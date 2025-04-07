@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube直播流监控</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+            background-color: #f8f9fa;
+        }
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .card-header {
+            font-weight: bold;
+            background-color: #f1f1f1;
+        }
+        .progress {
+            height: 25px;
+        }
+        .progress-bar {
+            line-height: 25px;
+            font-weight: bold;
+        }
+        .table th {
+            background-color: #f1f1f1;
+        }
+        .badge {
+            font-size: 0.9em;
+        }
+        .log-container {
+            background-color: #212529;
+            color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .refresh-btn {
+            position: absolute;
+            right: 25px;
+            top: 12px;
+        }
+        .nav-tabs .nav-link {
+            color: #495057;
+        }
+        .nav-tabs .nav-link.active {
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">YouTube直播流监控</h1>
+        
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        系统状态
+                        <button id="refreshStatus" class="btn btn-sm btn-primary">刷新</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h5>磁盘使用</h5>
+                                <div class="progress mb-3">
+                                    <div id="diskUsage" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                                </div>
+                                <p id="diskDetails">总空间: 0 GB, 已用: 0 GB, 可用: 0 GB</p>
+                            </div>
+                            <div class="col-md-6">
+                                <h5>内存使用</h5>
+                                <div class="progress mb-3">
+                                    <div id="memoryUsage" class="progress-bar bg-info" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                                </div>
+                                <p id="memoryDetails">RSS: 0 MB, 堆总量: 0 MB, 堆已用: 0 MB</p>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <h5>流服务状态</h5>
+                                <p>状态: <span id="serviceStatus" class="badge bg-secondary">未知</span></p>
+                                <p>活跃频道数: <span id="activeChannelCount">0</span></p>
+                            </div>
+                            <div class="col-md-6">
+                                <h5>系统信息</h5>
+                                <p>最后更新时间: <span id="lastUpdate">-</span></p>
+                                <p>监控服务运行时间: <span id="uptime">-</span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        频道状态
+                        <button id="refreshChannels" class="btn btn-sm btn-primary">刷新</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>频道ID</th>
+                                        <th>状态</th>
+                                        <th>客户端数</th>
+                                        <th>分片数</th>
+                                        <th>缓存大小</th>
+                                        <th>开始时间</th>
+                                        <th>最后活动</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="channelsTable">
+                                    <tr>
+                                        <td colspan="7" class="text-center">加载中...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        日志
+                        <button id="refreshLogs" class="btn btn-sm btn-primary refresh-btn">刷新</button>
+                    </div>
+                    <div class="card-body">
+                        <ul class="nav nav-tabs" id="logTabs" role="tablist">
+                            <!-- 日志标签将在这里动态生成 -->
+                        </ul>
+                        <div class="tab-content mt-3" id="logTabContent">
+                            <div class="log-container" id="logContent">
+                                选择一个日志文件查看内容...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 格式化字节大小
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+            
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+        
+        // 格式化时间戳
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            return date.toLocaleString();
+        }
+        
+        // 计算时间差
+        function timeDifference(current, previous) {
+            if (!previous) return '-';
+            
+            const msPerMinute = 60 * 1000;
+            const msPerHour = msPerMinute * 60;
+            const msPerDay = msPerHour * 24;
+            
+            const elapsed = current - previous;
+            
+            if (elapsed < msPerMinute) {
+                return Math.round(elapsed/1000) + ' 秒前';   
+            } else if (elapsed < msPerHour) {
+                return Math.round(elapsed/msPerMinute) + ' 分钟前';   
+            } else if (elapsed < msPerDay ) {
+                return Math.round(elapsed/msPerHour) + ' 小时前';   
+            } else {
+                return Math.round(elapsed/msPerDay) + ' 天前';   
+            }
+        }
+        
+        // 获取系统状态
+        async function getSystemStatus() {
+            try {
+                const response = await fetch('/api/system-status');
+                const data = await response.json();
+                
+                // 更新磁盘使用
+                const diskPercent = data.disk.percent;
+                document.getElementById('diskUsage').style.width = `${diskPercent}%`;
+                document.getElementById('diskUsage').textContent = `${diskPercent}%`;
+                document.getElementById('diskDetails').textContent = `总空间: ${formatBytes(data.disk.total)}, 已用: ${formatBytes(data.disk.used)}, 可用: ${formatBytes(data.disk.free)}`;
+                
+                // 更新内存使用
+                const memoryTotal = data.memory.heapTotal;
+                const memoryUsed = data.memory.heapUsed;
+                const memoryPercent = ((memoryUsed / memoryTotal) * 100).toFixed(2);
+                document.getElementById('memoryUsage').style.width = `${memoryPercent}%`;
+                document.getElementById('memoryUsage').textContent = `${memoryPercent}%`;
+                document.getElementById('memoryDetails').textContent = `RSS: ${formatBytes(data.memory.rss)}, 堆总量: ${formatBytes(memoryTotal)}, 堆已用: ${formatBytes(memoryUsed)}`;
+                
+                // 更新服务状态
+                const statusElement = document.getElementById('serviceStatus');
+                if (data.streamService.status === 'online') {
+                    statusElement.textContent = '在线';
+                    statusElement.className = 'badge bg-success';
+                } else {
+                    statusElement.textContent = '离线';
+                    statusElement.className = 'badge bg-danger';
+                }
+                
+                document.getElementById('activeChannelCount').textContent = data.streamService.activeChannels.length;
+                document.getElementById('lastUpdate').textContent = formatTimestamp(data.timestamp);
+                
+                // 更新日志标签
+                updateLogTabs(data.logs);
+                
+                return data;
+            } catch (err) {
+                console.error('Error fetching system status:', err);
+            }
+        }
+        
+        // 获取频道统计信息
+        async function getChannelStats() {
+            try {
+                const response = await fetch('/api/channel-stats');
+                const data = await response.json();
+                
+                const tableBody = document.getElementById('channelsTable');
+                tableBody.innerHTML = '';
+                
+                if (data.length === 0) {
+                    tableBody.innerHTML = '<tr><td colspan="7" class="text-center">没有活跃频道</td></tr>';
+                    return;
+                }
+                
+                const now = Date.now();
+                
+                data.forEach(channel => {
+                    const row = document.createElement('tr');
+                    
+                    // 频道ID
+                    const idCell = document.createElement('td');
+                    idCell.textContent = channel.channelId;
+                    row.appendChild(idCell);
+                    
+                    // 状态
+                    const statusCell = document.createElement('td');
+                    const statusBadge = document.createElement('span');
+                    statusBadge.className = `badge ${channel.isActive ? 'bg-success' : 'bg-secondary'}`;
+                    statusBadge.textContent = channel.isActive ? '活跃' : '非活跃';
+                    statusCell.appendChild(statusBadge);
+                    row.appendChild(statusCell);
+                    
+                    // 客户端数
+                    const clientsCell = document.createElement('td');
+                    clientsCell.textContent = channel.clientCount;
+                    row.appendChild(clientsCell);
+                    
+                    // 分片数
+                    const segmentsCell = document.createElement('td');
+                    segmentsCell.textContent = channel.segmentCount;
+                    row.appendChild(segmentsCell);
+                    
+                    // 缓存大小
+                    const sizeCell = document.createElement('td');
+                    sizeCell.textContent = formatBytes(channel.totalSize);
+                    row.appendChild(sizeCell);
+                    
+                    // 开始时间
+                    const startTimeCell = document.createElement('td');
+                    startTimeCell.textContent = channel.startTime ? formatTimestamp(channel.startTime) : '-';
+                    row.appendChild(startTimeCell);
+                    
+                    // 最后活动
+                    const lastActivityCell = document.createElement('td');
+                    lastActivityCell.textContent = channel.lastActivity ? timeDifference(now, channel.lastActivity) : '-';
+                    row.appendChild(lastActivityCell);
+                    
+                    tableBody.appendChild(row);
+                });
+            } catch (err) {
+                console.error('Error fetching channel stats:', err);
+                document.getElementById('channelsTable').innerHTML = '<tr><td colspan="7" class="text-center text-danger">获取频道信息失败</td></tr>';
+            }
+        }
+        
+        // 更新日志标签
+        function updateLogTabs(logs) {
+            const tabsContainer = document.getElementById('logTabs');
+            
+            // 清除现有标签
+            tabsContainer.innerHTML = '';
+            
+            // 添加新标签
+            logs.forEach((log, index) => {
+                const li = document.createElement('li');
+                li.className = 'nav-item';
+                li.role = 'presentation';
+                
+                const button = document.createElement('button');
+                button.className = 'nav-link';
+                button.id = `log-${index}-tab`;
+                button.setAttribute('data-bs-toggle', 'tab');
+                button.setAttribute('data-log-file', log.name);
+                button.setAttribute('type', 'button');
+                button.setAttribute('role', 'tab');
+                button.textContent = log.name;
+                
+                button.addEventListener('click', () => {
+                    loadLogContent(log.name);
+                    
+                    // 设置活跃标签
+                    document.querySelectorAll('#logTabs .nav-link').forEach(tab => {
+                        tab.classList.remove('active');
+                    });
+                    button.classList.add('active');
+                });
+                
+                li.appendChild(button);
+                tabsContainer.appendChild(li);
+                
+                // 默认选中第一个标签
+                if (index === 0) {
+                    button.classList.add('active');
+                    loadLogContent(log.name);
+                }
+            });
+        }
+        
+        // 加载日志内容
+        async function loadLogContent(filename) {
+            try {
+                const logContainer = document.getElementById('logContent');
+                logContainer.textContent = '加载中...';
+                
+                const response = await fetch(`/api/logs/${filename}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const content = await response.text();
+                logContainer.textContent = content || '日志为空';
+                
+                // 滚动到底部
+                logContainer.scrollTop = logContainer.scrollHeight;
+            } catch (err) {
+                console.error('Error loading log content:', err);
+                document.getElementById('logContent').textContent = `加载日志失败: ${err.message}`;
+            }
+        }
+        
+        // 初始化页面
+        async function initPage() {
+            await getSystemStatus();
+            await getChannelStats();
+            
+            // 设置刷新按钮事件
+            document.getElementById('refreshStatus').addEventListener('click', getSystemStatus);
+            document.getElementById('refreshChannels').addEventListener('click', getChannelStats);
+            document.getElementById('refreshLogs').addEventListener('click', () => {
+                const activeTab = document.querySelector('#logTabs .nav-link.active');
+                if (activeTab) {
+                    loadLogContent(activeTab.getAttribute('data-log-file'));
+                }
+            });
+            
+            // 设置定时刷新
+            setInterval(getSystemStatus, 30000); // 每30秒刷新一次系统状态
+            setInterval(getChannelStats, 10000); // 每10秒刷新一次频道状态
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', initPage);
+    </script>
+</body>
+</html>
