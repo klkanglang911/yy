@@ -1,18 +1,18 @@
 #EXTM3U
 #EXTINF:-1 tvg-id="CCTV1" tvg-name="CCTV1" tvg-logo="http://epg.51zmt.top:8000/tb1/CCTV/CCTV1.png" group-title="央视",CCTV-1高清
-http://your-server-ip/channel/9YLKgcosxbo/playlist.m3u8?token=your-token-here
+http://your-server-ip:8081/channel/9YLKgcosxbo/playlist.m3u8?token=your-token-here
 
 #EXTINF:-1 tvg-id="CCTV2" tvg-name="CCTV2" tvg-logo="http://epg.51zmt.top:8000/tb1/CCTV/CCTV2.png" group-title="央视",CCTV-2高清
-http://your-server-ip/channel/jE0Sm9jtizA/playlist.m3u8?token=your-token-here
+http://your-server-ip:8081/channel/jE0Sm9jtizA/playlist.m3u8?token=your-token-here
 
 #EXTINF:-1 tvg-id="CCTV3" tvg-name="CCTV3" tvg-logo="http://epg.51zmt.top:8000/tb1/CCTV/CCTV3.png" group-title="央视",CCTV-3高清
-http://your-server-ip/channel/nV-GmGE5Aw0/playlist.m3u8?token=your-token-here
+http://your-server-ip:8081/channel/nV-GmGE5Aw0/playlist.m3u8?token=your-token-here
 
 #EXTINF:-1 tvg-id="CCTV4" tvg-name="CCTV4" tvg-logo="http://epg.51zmt.top:8000/tb1/CCTV/CCTV4.png" group-title="央视",CCTV-4高清
-http://your-server-ip/channel/9sUBAjdLM-I/playlist.m3u8?token=your-token-here
+http://your-server-ip:8081/channel/9sUBAjdLM-I/playlist.m3u8?token=your-token-here
 
 #EXTINF:-1 tvg-id="CCTV5" tvg-name="CCTV5" tvg-logo="http://epg.51zmt.top:8000/tb1/CCTV/CCTV5.png" group-title="央视",CCTV-5高清
-http://your-server-ip/channel/2SfHCQN_BxQ/playlist.m3u8?token=your-token-here
+http://your-server-ip:8081/channel/2SfHCQN_BxQ/playlist.m3u8?token=your-token-here
 
 # 注意：以上YouTube视频ID仅为示例，请替换为实际的直播频道ID
 # 请将your-server-ip替换为您的服务器IP地址

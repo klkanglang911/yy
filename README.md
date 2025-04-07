@@ -58,7 +58,7 @@ docker-compose up -d
 直播流URL格式为：
 
 ```
-http://your-server-ip/channel/{youtube-channel-id}/playlist.m3u8?token={access-token}
+http://your-server-ip:8081/channel/{youtube-channel-id}/playlist.m3u8?token={access-token}
 ```
 
 其中：
@@ -82,7 +82,7 @@ docker-compose exec stream-service node -e "console.log(require('jsonwebtoken').
 
 ## 监控系统
 
-访问 `http://your-server-ip/monitor` 查看监控界面，包括：
+访问 `http://your-server-ip:8080/monitor` 查看监控界面，包括：
 
 - 系统资源使用情况
 - 活跃频道列表
