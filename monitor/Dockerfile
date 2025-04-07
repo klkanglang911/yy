@@ -1,5 +1,8 @@
 FROM node:16-alpine
 
+# 安装Python和编译工具
+RUN apk add --no-cache python3 make g++ gcc
+
 # 创建app目录
 WORKDIR /app
 

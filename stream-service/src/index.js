@@ -62,16 +62,16 @@ app.use((req, res, next) => {
 // 验证token
 app.get('/api/validate-token', (req, res) => {
   const token = req.query.token;
-  
+
   // 如果没有设置TOKEN_SECRET，则不验证token
   if (!process.env.TOKEN_SECRET) {
     return res.status(200).send('Token validation skipped');
   }
-  
+
   if (!token) {
     return res.status(401).send('No token provided');
   }
-  
+
   try {
     jwt.verify(token, config.tokenSecret);
     res.status(200).send('Token valid');
@@ -85,24 +85,24 @@ app.get('/api/validate-token', (req, res) => {
 app.get('/api/start-stream', async (req, res) => {
   const channelId = req.headers['x-channel-id'];
   const clientIp = req.headers['x-real-ip'] || req.ip;
-  
+
   if (!channelId) {
     return res.status(400).send('Channel ID is required');
   }
-  
+
   try {
     // 检查频道是否已经活跃
     if (!activeChannels.has(channelId)) {
       logger.info(`Starting stream for channel ${channelId} requested by ${clientIp}`);
-      
+
       // 创建频道目录
       const channelDir = path.join(config.streamsDir, channelId);
       const segmentsDir = path.join(channelDir, 'segments');
       await fs.ensureDir(segmentsDir);
-      
+
       // 启动流处理
       startStreamProcess(channelId);
-      
+
       // 添加到活跃频道
       activeChannels.set(channelId, {
         clients: new Set([clientIp]),
@@ -114,7 +114,7 @@ app.get('/api/start-stream', async (req, res) => {
       const channelInfo = activeChannels.get(channelId);
       channelInfo.clients.add(clientIp);
       channelInfo.lastActivity = Date.now();
-      
+
       // 如果有关闭计时器，取消它
       if (channelInfo.shutdownTimer) {
         clearTimeout(channelInfo.shutdownTimer);
@@ -122,7 +122,7 @@ app.get('/api/start-stream', async (req, res) => {
         logger.info(`Cancelled shutdown for channel ${channelId}`);
       }
     }
-    
+
     res.status(200).send('Stream started');
   } catch (err) {
     logger.error(`Error starting stream for channel ${channelId}: ${err.message}`);
@@ -134,24 +134,24 @@ app.get('/api/start-stream', async (req, res) => {
 app.get('/api/keep-alive', (req, res) => {
   const channelId = req.headers['x-channel-id'];
   const clientIp = req.headers['x-real-ip'] || req.ip;
-  
+
   if (!channelId) {
     return res.status(400).send('Channel ID is required');
   }
-  
+
   if (activeChannels.has(channelId)) {
     const channelInfo = activeChannels.get(channelId);
     channelInfo.clients.add(clientIp);
     channelInfo.lastActivity = Date.now();
   }
-  
+
   res.status(200).send('Connection kept alive');
 });
 
 // 获取活跃频道列表
 app.get('/api/active-channels', (req, res) => {
   const channelsInfo = [];
-  
+
   for (const [channelId, info] of activeChannels.entries()) {
     channelsInfo.push({
       channelId,
@@ -160,7 +160,7 @@ app.get('/api/active-channels', (req, res) => {
       lastActivity: info.lastActivity
     });
   }
-  
+
   res.json(channelsInfo);
 });
 
@@ -189,31 +189,57 @@ async function startStreamProcess(channelId) {
     const channelDir = path.join(config.streamsDir, channelId);
     const segmentsDir = path.join(channelDir, 'segments');
     const playlistPath = path.join(channelDir, 'playlist.m3u8');
-    
+
     // 确保目录存在
     await fs.ensureDir(segmentsDir);
-    
+
     // 获取YouTube直播URL
     logger.info(`Fetching YouTube stream URL for channel ${channelId}`);
     const videoUrl = `https://www.youtube.com/watch?v=${channelId}`;
-    
-    // 使用ytdl获取最高质量的流
-    const info = await ytdl.getInfo(videoUrl);
-    const format = ytdl.chooseFormat(info.formats, { 
-      quality: config.maxQuality ? 'highest' : 'highestvideo',
-      filter: 'videoandaudio'
-    });
-    
-    if (!format) {
-      throw new Error('No suitable format found');
+
+    // 检查API密钥
+    if (!config.youtubeApiKey) {
+      logger.error('YouTube API key is not set. Please set YOUTUBE_API_KEY in .env file');
+      throw new Error('YouTube API key is not set');
     }
-    
-    logger.info(`Selected format: ${format.qualityLabel} (${format.container})`);
-    
-    // 创建HLS流
-    const stream = ytdl(videoUrl, { format: format });
-    
+
+    logger.info(`Using YouTube API key: ${config.youtubeApiKey.substring(0, 5)}...`);
+
+    let stream;
+    let format;
+
+    try {
+      // 使用ytdl获取最高质量的流
+      logger.info('Getting video info...');
+      const info = await ytdl.getInfo(videoUrl);
+
+      logger.info(`Available formats: ${info.formats.length}`);
+      info.formats.forEach((f, i) => {
+        logger.info(`Format ${i}: ${f.qualityLabel || 'N/A'} (${f.container || 'N/A'})`);
+      });
+
+      format = ytdl.chooseFormat(info.formats, {
+        quality: config.maxQuality ? 'highest' : 'highestvideo',
+        filter: 'videoandaudio'
+      });
+
+      if (!format) {
+        throw new Error('No suitable format found');
+      }
+
+      logger.info(`Selected format: ${format.qualityLabel} (${format.container})`);
+
+      // 创建HLS流
+      logger.info('Creating stream...');
+      stream = ytdl(videoUrl, { format: format });
+    } catch (err) {
+      logger.error(`Error getting YouTube stream: ${err.message}`);
+      logger.error(err.stack);
+      throw err;
+    }
+
     // 使用ffmpeg处理流
+    logger.info('Setting up ffmpeg process...');
     const ffmpegProcess = ffmpeg(stream)
       .outputOptions([
         '-c:v copy',              // 复制视频流，不重新编码
@@ -230,6 +256,7 @@ async function startStreamProcess(channelId) {
       })
       .on('error', (err) => {
         logger.error(`FFmpeg error for channel ${channelId}: ${err.message}`);
+        logger.error(err.stack);
         // 尝试重启流
         setTimeout(() => {
           if (activeChannels.has(channelId) && activeChannels.get(channelId).clients.size > 0) {
@@ -238,29 +265,40 @@ async function startStreamProcess(channelId) {
           }
         }, 5000);
       })
+      .on('progress', (progress) => {
+        logger.info(`FFmpeg progress for channel ${channelId}: ${JSON.stringify(progress)}`);
+      })
       .on('end', () => {
         logger.info(`FFmpeg process ended for channel ${channelId}`);
       });
-    
+
     // 启动ffmpeg进程
-    ffmpegProcess.run();
-    
-    // 保存进程引用以便后续管理
-    if (activeChannels.has(channelId)) {
-      activeChannels.get(channelId).ffmpegProcess = ffmpegProcess;
+    try {
+      logger.info('Starting ffmpeg process...');
+      ffmpegProcess.run();
+      logger.info('FFmpeg process started successfully');
+
+      // 保存进程引用以便后续管理
+      if (activeChannels.has(channelId)) {
+        activeChannels.get(channelId).ffmpegProcess = ffmpegProcess;
+      }
+    } catch (err) {
+      logger.error(`Error starting ffmpeg process: ${err.message}`);
+      logger.error(err.stack);
+      throw err;
     }
-    
+
     // 创建初始M3U8播放列表文件（如果ffmpeg尚未创建）
     const initialPlaylist = `#EXTM3U
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:${config.segmentDuration}
 #EXT-X-MEDIA-SEQUENCE:0
 `;
-    
+
     if (!fs.existsSync(playlistPath)) {
       await fs.writeFile(playlistPath, initialPlaylist);
     }
-    
+
     logger.info(`Stream process started for channel ${channelId}`);
     return true;
   } catch (err) {
@@ -273,7 +311,7 @@ async function startStreamProcess(channelId) {
 function stopStreamProcess(channelId) {
   if (activeChannels.has(channelId)) {
     const channelInfo = activeChannels.get(channelId);
-    
+
     if (channelInfo.ffmpegProcess) {
       try {
         channelInfo.ffmpegProcess.kill('SIGKILL');
@@ -282,7 +320,7 @@ function stopStreamProcess(channelId) {
         logger.error(`Error stopping ffmpeg process for channel ${channelId}: ${err.message}`);
       }
     }
-    
+
     activeChannels.delete(channelId);
     logger.info(`Channel ${channelId} removed from active channels`);
   }
@@ -291,12 +329,12 @@ function stopStreamProcess(channelId) {
 // 定期检查不活跃的频道
 setInterval(() => {
   const now = Date.now();
-  
+
   for (const [channelId, channelInfo] of activeChannels.entries()) {
     // 如果没有活跃客户端且没有设置关闭计时器
     if (channelInfo.clients.size === 0 && !channelInfo.shutdownTimer) {
       logger.info(`No active clients for channel ${channelId}, scheduling shutdown`);
-      
+
       // 设置关闭计时器
       channelInfo.shutdownTimer = setTimeout(() => {
         logger.info(`Shutting down stream for channel ${channelId} due to inactivity`);
@@ -317,18 +355,18 @@ setInterval(() => {
 setInterval(async () => {
   try {
     logger.info('Starting cache cleanup');
-    
+
     const dirs = await fs.readdir(config.streamsDir);
-    
+
     for (const dir of dirs) {
       const channelDir = path.join(config.streamsDir, dir);
       const segmentsDir = path.join(channelDir, 'segments');
-      
+
       // 如果不是活跃频道，清理旧文件
       if (!activeChannels.has(dir)) {
         const stats = await fs.stat(channelDir);
         const ageInHours = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
-        
+
         // 如果目录超过2小时未修改，删除它
         if (ageInHours > 2) {
           logger.info(`Removing old channel directory: ${channelDir}`);
@@ -339,23 +377,23 @@ setInterval(async () => {
       else if (await fs.pathExists(segmentsDir)) {
         const files = await fs.readdir(segmentsDir);
         const tsFiles = files.filter(file => file.endsWith('.ts')).sort();
-        
+
         // 计算要保留的分片数量
         const keepCount = Math.ceil(config.bufferSize / config.segmentDuration);
-        
+
         // 如果分片数量超过保留数量，删除旧分片
         if (tsFiles.length > keepCount) {
           const filesToRemove = tsFiles.slice(0, tsFiles.length - keepCount);
-          
+
           for (const file of filesToRemove) {
             await fs.remove(path.join(segmentsDir, file));
           }
-          
+
           logger.info(`Removed ${filesToRemove.length} old segments for channel ${dir}`);
         }
       }
     }
-    
+
     logger.info('Cache cleanup completed');
   } catch (err) {
     logger.error(`Error during cache cleanup: ${err.message}`);
@@ -365,12 +403,12 @@ setInterval(async () => {
 // 优雅关闭
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received, shutting down gracefully');
-  
+
   // 停止所有活跃流
   for (const [channelId, _] of activeChannels.entries()) {
     stopStreamProcess(channelId);
   }
-  
+
   // 延迟退出以允许日志写入
   setTimeout(() => {
     process.exit(0);
@@ -379,12 +417,12 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   logger.info('SIGINT received, shutting down gracefully');
-  
+
   // 停止所有活跃流
   for (const [channelId, _] of activeChannels.entries()) {
     stopStreamProcess(channelId);
   }
-  
+
   // 延迟退出以允许日志写入
   setTimeout(() => {
     process.exit(0);

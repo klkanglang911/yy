@@ -6,7 +6,9 @@ const { combine, timestamp, printf } = format;
 const moment = require('moment');
 const cors = require('cors');
 const fetch = require('node-fetch');
-const diskusage = require('diskusage');
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 require('dotenv').config();
 
 // 创建日志记录器
@@ -52,21 +54,21 @@ app.use((req, res, next) => {
 app.get('/api/system-status', async (req, res) => {
   try {
     // 获取磁盘使用情况
-    const disk = await diskusage.check('/');
-    
+    const disk = await getDiskUsage('/');
+
     // 获取内存使用情况
     const memoryUsage = process.memoryUsage();
-    
+
     // 获取流服务状态
     let streamServiceStatus = 'unknown';
     let activeChannels = [];
-    
+
     try {
       const response = await fetch(`${config.streamServiceUrl}/api/status`);
       if (response.ok) {
         const data = await response.json();
         streamServiceStatus = 'online';
-        
+
         // 获取活跃频道
         const channelsResponse = await fetch(`${config.streamServiceUrl}/api/active-channels`);
         if (channelsResponse.ok) {
@@ -77,10 +79,10 @@ app.get('/api/system-status', async (req, res) => {
       streamServiceStatus = 'offline';
       logger.error(`Error fetching stream service status: ${err.message}`);
     }
-    
+
     // 获取日志文件列表
     const logFiles = await getLogFiles();
-    
+
     // 返回状态信息
     res.json({
       timestamp: Date.now(),
@@ -113,24 +115,24 @@ app.get('/api/logs/:filename', async (req, res) => {
   try {
     const filename = req.params.filename;
     const filePath = path.join(config.logsDir, filename);
-    
+
     // 安全检查：确保文件在日志目录中
     if (!filePath.startsWith(config.logsDir)) {
       return res.status(403).send('Access denied');
     }
-    
+
     // 检查文件是否存在
     if (!await fs.pathExists(filePath)) {
       return res.status(404).send('Log file not found');
     }
-    
+
     // 读取文件内容
     const content = await fs.readFile(filePath, 'utf8');
-    
+
     // 返回最后1000行
     const lines = content.split('\n');
     const lastLines = lines.slice(Math.max(0, lines.length - 1000)).join('\n');
-    
+
     res.send(lastLines);
   } catch (err) {
     logger.error(`Error reading log file: ${err.message}`);
@@ -143,7 +145,7 @@ app.get('/api/channel-stats', async (req, res) => {
   try {
     // 获取活跃频道
     let activeChannels = [];
-    
+
     try {
       const response = await fetch(`${config.streamServiceUrl}/api/active-channels`);
       if (response.ok) {
@@ -152,40 +154,40 @@ app.get('/api/channel-stats', async (req, res) => {
     } catch (err) {
       logger.error(`Error fetching active channels: ${err.message}`);
     }
-    
+
     // 获取频道目录
     const channelDirs = await fs.readdir(config.streamsDir);
-    
+
     // 收集频道统计信息
     const channelStats = [];
-    
+
     for (const dir of channelDirs) {
       const channelDir = path.join(config.streamsDir, dir);
       const segmentsDir = path.join(channelDir, 'segments');
-      
+
       // 检查是否是目录
       const stats = await fs.stat(channelDir);
       if (!stats.isDirectory()) continue;
-      
+
       // 获取分片文件
       let segmentCount = 0;
       let totalSize = 0;
-      
+
       if (await fs.pathExists(segmentsDir)) {
         const files = await fs.readdir(segmentsDir);
         const tsFiles = files.filter(file => file.endsWith('.ts'));
         segmentCount = tsFiles.length;
-        
+
         // 计算总大小
         for (const file of tsFiles) {
           const fileStats = await fs.stat(path.join(segmentsDir, file));
           totalSize += fileStats.size;
         }
       }
-      
+
       // 查找活跃信息
       const activeInfo = activeChannels.find(ch => ch.channelId === dir);
-      
+
       channelStats.push({
         channelId: dir,
         isActive: !!activeInfo,
@@ -197,7 +199,7 @@ app.get('/api/channel-stats', async (req, res) => {
         lastModified: stats.mtime
       });
     }
-    
+
     res.json(channelStats);
   } catch (err) {
     logger.error(`Error getting channel stats: ${err.message}`);
@@ -210,12 +212,12 @@ async function getLogFiles() {
   try {
     const files = await fs.readdir(config.logsDir);
     const logFiles = [];
-    
+
     for (const file of files) {
       if (file.endsWith('.log')) {
         const filePath = path.join(config.logsDir, file);
         const stats = await fs.stat(filePath);
-        
+
         logFiles.push({
           name: file,
           size: stats.size,
@@ -223,7 +225,7 @@ async function getLogFiles() {
         });
       }
     }
-    
+
     return logFiles;
   } catch (err) {
     logger.error(`Error reading log files: ${err.message}`);
@@ -231,8 +233,36 @@ async function getLogFiles() {
   }
 }
 
+// 获取磁盘使用情况
+async function getDiskUsage(path) {
+  try {
+    // 使用df命令获取磁盘使用情况
+    const { stdout } = await execPromise('df -k ' + path);
+
+    // 解析输出
+    const lines = stdout.trim().split('\n');
+    const parts = lines[1].split(/\s+/);
+
+    // 计算磁盘使用情况
+    const total = parseInt(parts[1]) * 1024; // 转换为字节
+    const used = parseInt(parts[2]) * 1024;
+    const free = parseInt(parts[3]) * 1024;
+
+    return { total, free, used };
+  } catch (err) {
+    logger.error(`Error getting disk usage: ${err.message}`);
+    // 返回默认值
+    return { total: 0, free: 0, used: 0 };
+  }
+}
+
 // 主页路由
 app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// 监控页面路由
+app.get('/monitor', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
